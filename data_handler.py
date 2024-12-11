@@ -39,7 +39,7 @@ class DataHandler:
 
         self.dataset = self.load_datasets(self.DATASET_DIR)
         self.dataset = self.normalize_features(self.dataset)
-        self.train_data, self.test_data= self.split_subjects(self.dataset)
+        self.split_subjects(self.dataset)
 
 
     def load_datasets (self, dataset_dir : str) -> pd.DataFrame:
@@ -69,28 +69,26 @@ class DataHandler:
 
 
     # Split the dataset by subjects, setting aside some for testing
-    def split_subjects (self, dataset: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def split_subjects (self, dataset: pd.DataFrame):
         # Retrieve the names of all subjects
         subjects = dataset['subject'].unique()
         
-        train_subjects, test_subjects = train_test_split(
+        self.train_subjects, self.test_subjects = train_test_split(
             subjects, test_size=self.NUM_OF_TEST_SUBJECTS, random_state=self.random_state
         )
 
         print("\nTraining and testing subjects have been selected!\n")
-        print(f"Train Subjects: {train_subjects}")
-        print(f"Test Subjects: {test_subjects}\n")
+        print(f"Train Subjects: {self.train_subjects}")
+        print(f"Test Subjects: {self.test_subjects}\n")
 
         # Split data into training and test sets by subject
-        train_data = dataset[dataset['subject'].isin(train_subjects)]
-        test_data = dataset[dataset['subject'].isin(test_subjects)]
+        self.train_data = dataset[dataset['subject'].isin(self.train_subjects)]
+        self.test_data = dataset[dataset['subject'].isin(self.test_subjects)]
         
         print("\nTrain Set Class Distribution:\n", 
-              train_data[self.label_column].value_counts(normalize=True))
+              self.train_data[self.label_column].value_counts(normalize=True))
         print("\nTest Set Class Distribution:\n", 
-              test_data[self.label_column].value_counts(normalize=True))
-
-        return train_data, test_data
+              self.test_data[self.label_column].value_counts(normalize=True))
 
 
     def create_stratified_sample (self, data : pd.DataFrame, used_indices: set, sample_size : int, subject : str = None) -> pd.DataFrame:
