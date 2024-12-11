@@ -40,7 +40,7 @@ class ModelTrainer:
         model.fit(x_train, y_train)
         # ...then log it.
         # Log the model with an example input
-        input_example = np.array([training_data.iloc[0].tolist()])
+        input_example = np.array([training_data[self.feature_columns].iloc[0].tolist()])
         mlflow.sklearn.log_model(model, "random_forest_model", input_example=input_example)
 
         return model
