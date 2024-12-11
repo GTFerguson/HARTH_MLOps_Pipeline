@@ -7,12 +7,6 @@ import mlflow.sklearn
 
 class ModelTrainer:
 
-    tolerance_thresholds = {
-        'accuracy': 0.9,
-        'f1_score': 0.85
-    }
-
-
     def __init__ (self, label_column : str, feature_columns : list[str], random_state : int):
         self.label_column = label_column
         self.feature_columns = feature_columns
@@ -52,7 +46,11 @@ class ModelTrainer:
         return model
     
 
-    def test_model (self, model : RandomForestClassifier, test_data : pd.DataFrame):
+    def test_model (self, model : RandomForestClassifier, test_data : pd.DataFrame) -> dict:
+        '''
+        Tests a given model on the provided test data. The resulting metrics are logged in MLFlow
+        and returned for later usage.
+        '''
         x_test = test_data[self.feature_columns]
         y_test = test_data[self.label_column]
 
@@ -76,3 +74,11 @@ class ModelTrainer:
         mlflow.log_metric("precision", precision)
         mlflow.log_metric("recall", recall)
         mlflow.log_metric("f1_score", f1)
+
+        # Return metrics as a dictionary
+        return {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1
+        }
