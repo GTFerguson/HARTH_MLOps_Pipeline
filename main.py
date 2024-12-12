@@ -7,20 +7,22 @@ import model_trainer as mt
 LABEL_COLUMN = 'label'
 FEATURE_COLUMNS = ['back_x', 'back_y', 'back_z', 'thigh_x', 'thigh_y', 'thigh_z']
 RANDOM_STATE = 42
-TRAIN_SAMPLE_SIZE = 500
+TRAIN_SAMPLE_SIZE = 1000
 TEST_SAMPLE_SIZE = 2000
 
 THRESHOLDS = {
-    'accuracy': 0.9,
+    'accuracy': 0.85,
+    'recall': 0.85,
+    'precision': 0.85,
     'f1_score': 0.85
 }
 
 
 DRIFT_THRESHOLD = {
-    "accuracy": 0.05,  # Maximum allowed drop in accuracy
-    "f1_score": 0.05,  # Maximum allowed drop in F1-score
-    "precision": 0.05,  # Maximum allowed drop in precision
-    "recall": 0.05,  # Maximum allowed drop in recall
+    "accuracy": 0.02,  # Maximum allowed drop in accuracy
+    "f1_score": 0.02,  # Maximum allowed drop in F1-score
+    "precision": 0.02,  # Maximum allowed drop in precision
+    "recall": 0.02,  # Maximum allowed drop in recall
 }
 
 
@@ -138,26 +140,28 @@ def test_cross_subject(data_handler: dh.DataHandler, trainer: mt.ModelTrainer, m
     Returns:
         bool: True if all cross-subject tests meet thresholds, False otherwise.
     """
+
     print("Performing cross-subject testing...")
     cross_subject_failures = 0
 
     for test_subject in data_handler.test_subjects:
-        mlflow.set_tag("test_type", "cross-subject")
-        mlflow.set_tag("test_subject", test_subject)
-        print(f"Testing on {test_subject}...")
+        with mlflow.start_run(run_name=f"cross_subject_test_{test_subject}", nested=True):
+            mlflow.set_tag("test_type", "cross-subject")
+            mlflow.set_tag("test_subject", test_subject)
+            print(f"Testing on {test_subject}...")
 
-        test_sample = data_handler.create_stratified_sample(
-            data=data_handler.test_data,
-            used_indices=data_handler.test_used_indices,
-            sample_size=TEST_SAMPLE_SIZE,
-            subject=test_subject,
-        )
+            test_sample = data_handler.create_stratified_sample(
+                data=data_handler.test_data,
+                used_indices=data_handler.test_used_indices,
+                sample_size=TEST_SAMPLE_SIZE,
+                subject=test_subject,
+            )
 
-        metrics = trainer.test_model(model, test_sample)
+            metrics = trainer.test_model(model, test_sample)
 
-        if not all(metrics[metric] >= thresholds[metric] for metric in thresholds):
-            print(f"Cross-subject test failed for {test_subject}.")
-            cross_subject_failures += 1
+            if not all(metrics[metric] >= thresholds[metric] for metric in thresholds):
+                print(f"Cross-subject test failed for {test_subject}.")
+                cross_subject_failures += 1
 
     # Success state
     if cross_subject_failures == 0:
@@ -279,7 +283,7 @@ def central_training_loop(data_handler: dh.DataHandler, thresholds: dict, max_it
             trainer = mt.ModelTrainer(LABEL_COLUMN, FEATURE_COLUMNS, RANDOM_STATE)
             model, cumulative_data = train_on_subject(data_handler, cumulative_data, trainer, train_subject)
 
-            # Predefine samples from each training subject for same-subject testing
+            # Same-subject testing samples from each training subject 
             ss_samples = {
                 subject: data_handler.create_stratified_sample(
                     data=data_handler.train_data,
@@ -290,50 +294,64 @@ def central_training_loop(data_handler: dh.DataHandler, thresholds: dict, max_it
                 for subject in data_handler.train_subjects
             }
 
+            # Cross-subject testing samples from each testing subject 
+            cs_samples = {
+                subject: data_handler.create_stratified_sample(
+                    data=data_handler.test_data,
+                    used_indices=data_handler.test_used_indices,
+                    sample_size=TEST_SAMPLE_SIZE,
+                    subject=subject,
+                )
+                for subject in data_handler.test_subjects
+               
+            }
+
             ss_iteration = 1
             ss_successful = False
             current_metrics = None
 
-            # Evaluate same-subject performance... 
-            with mlflow.start_run(run_name=f"same_subject_test_{train_subject}_iteration_{ss_iteration}", nested=True):
-                ss_successful, current_metrics = same_subject_test(
-                    data_handler, trainer, model, ss_iteration, len(cumulative_data), 
-                    ss_samples[train_subject], THRESHOLDS
-                )
-
-            # model is trained on same-subject until threshold metrics are met
-            while not ss_successful:
-                ss_iteration += 1
-                print(f"Same-subject test failed for {train_subject}. Retraining with additional samples.")
-
+            with mlflow.start_run(run_name="same_subject_tests", nested=True):
+                # Evaluate same-subject performance... 
                 with mlflow.start_run(run_name=f"same_subject_test_{train_subject}_iteration_{ss_iteration}", nested=True):
-                    # Retrain model with new sample
-                    new_model, new_cumulative_data = train_on_subject(
-                        data_handler, cumulative_data, trainer, train_subject
-                    )
-
-                    ss_successful, latest_metrics = same_subject_test(
+                    ss_successful, current_metrics = same_subject_test(
                         data_handler, trainer, model, ss_iteration, len(cumulative_data), 
                         ss_samples[train_subject], THRESHOLDS
                     )
-                    
-                    # Check if new sample has negatively impacted performance
-                    if detect_drift (current_metrics, latest_metrics):
-                        print("Performance drift detected! Rejecting the latest training sample.")
-                        mlflow.log_metric("drift_detected", 1)
-                    else: # No drift detected, save our new model and training data
-                        print("No drift detected. Accepting the latest training sample.")
-                        model = new_model
-                        cumulative_data = new_cumulative_data
-                        mlflow.log_metric("drift_detected", 0)
+
+                # model is trained on same-subject until threshold metrics are met
+                while not ss_successful:
+                    ss_iteration += 1
+                    print(f"Same-subject test failed for {train_subject}. Retraining with additional samples.")
+
+                    with mlflow.start_run(run_name=f"same_subject_test_{train_subject}_iteration_{ss_iteration}", nested=True):
+                        # Retrain model with new sample
+                        new_model, new_cumulative_data = train_on_subject(
+                            data_handler, cumulative_data, trainer, train_subject
+                        )
+
+                        ss_successful, latest_metrics = same_subject_test(
+                            data_handler, trainer, model, ss_iteration, len(cumulative_data), 
+                            ss_samples[train_subject], THRESHOLDS
+                        )
+                        
+                        # Check if new sample has negatively impacted performance
+                        if detect_drift (current_metrics, latest_metrics):
+                            print("Performance drift detected! Rejecting the latest training sample.")
+                            mlflow.log_metric("drift_detected", 1)
+                        else: # No drift detected, save our new model and training data
+                            print("No drift detected. Accepting the latest training sample.")
+                            model = new_model
+                            cumulative_data = new_cumulative_data
+                            mlflow.log_metric("drift_detected", 0)
 
             # Evaluate cross-subject performance, if thresholds are not met we must keep training with a new subject
-            if not test_cross_subject(data_handler, trainer, model, thresholds):
-                print(f"Cross-subject test failed for {train_subject}.")
-                mlflow.log_metric("cross_subject_pass", 0)
-            else: # Model successfully trained, exit loop
-                mlflow.log_metric("cross_subject_pass", 1)
-                break
+            with mlflow.start_run(run_name="cross_subject_tests", nested=True):
+                if not test_cross_subject(data_handler, trainer, model, thresholds):
+                    print(f"Cross-subject test failed for {train_subject}.")
+                    mlflow.log_metric("cross_subject_pass", 0)
+                else: # Model successfully trained, exit loop
+                    mlflow.log_metric("cross_subject_pass", 1)
+                    break
 
         print("Restarting with a new training subject.")
         iteration += 1
