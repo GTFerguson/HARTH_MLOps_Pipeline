@@ -379,6 +379,11 @@ def central_training_loop(data_handler: dh.DataHandler, thresholds: dict, max_it
     cumulative_data = pd.DataFrame()
     current_metrics = None
 
+    # Ensure there is no run already active
+    if mlflow.active_run():
+        print(f"Ending active run: {mlflow.active_run().info.run_id}")
+        mlflow.end_run()
+
     while iteration <= max_iterations and train_subjects:
         train_subject = train_subjects.pop(0)  # Select a training subject
         print(f"\nIteration {iteration} - Starting with subject {train_subject}...")
