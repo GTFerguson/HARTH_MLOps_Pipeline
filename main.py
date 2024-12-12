@@ -464,7 +464,7 @@ def central_training_loop(data_handler: dh.DataHandler, thresholds: dict, max_it
                 # promote to production if it's the best performing
 
 
-                if cs_fail_count is 0: # Model successfully trained, exit loop
+                if cs_fail_count == 0: # Model successfully trained, exit loop
                     print("Cross-subject tests have been passed!")
                     break
                 else: # CS results have not met thresholds, continue to next subject 
