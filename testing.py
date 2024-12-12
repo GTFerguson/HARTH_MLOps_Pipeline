@@ -29,9 +29,15 @@ class TestDriftDetection(unittest.TestCase):
         previous_metrics = {"accuracy": 0.9, "f1_score": 0.85}
         new_metrics_no_drift = {"accuracy": 0.91, "f1_score": 0.86}
         new_metrics_with_drift = {"accuracy": 0.8, "f1_score": 0.7}
+        new_metrics_on_threshold = {"accuracy": 0.85, "f1_score": 0.8}
+        new_metrics_drift_one_metric = {"accuracy": 0.849, "f1_score": 0.85}
+        new_metrics_identical = previous_metrics
 
         self.assertFalse(detect_drift(previous_metrics, new_metrics_no_drift))
+        self.assertFalse(detect_drift(previous_metrics, new_metrics_identical))
+        self.assertFalse(detect_drift(previous_metrics, new_metrics_on_threshold))
         self.assertTrue(detect_drift(previous_metrics, new_metrics_with_drift))
+        self.assertTrue(detect_drift(previous_metrics, new_metrics_drift_one_metric))
 
 
 class TestTrainOnSubject(unittest.TestCase):

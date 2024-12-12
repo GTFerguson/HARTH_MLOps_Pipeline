@@ -1,5 +1,6 @@
 import pandas as pd
 import mlflow
+from mlflow import MlflowClient
 import data_handler as dh
 import model_trainer as mt
 
@@ -7,8 +8,8 @@ import model_trainer as mt
 LABEL_COLUMN = 'label'
 FEATURE_COLUMNS = ['back_x', 'back_y', 'back_z', 'thigh_x', 'thigh_y', 'thigh_z']
 RANDOM_STATE = 42
-TRAIN_SAMPLE_SIZE = 1000
-TEST_SAMPLE_SIZE = 2000
+TRAIN_SAMPLE_SIZE = 2000
+TEST_SAMPLE_SIZE = 4000
 
 THRESHOLDS = {
     'accuracy': 0.85,
@@ -127,7 +128,10 @@ def test_model (
     return False, metrics
 
 
-def test_cross_subject(data_handler: dh.DataHandler, trainer: mt.ModelTrainer, model, thresholds: dict) -> bool:
+def test_cross_subject(
+    data_handler: dh.DataHandler, 
+    trainer: mt.ModelTrainer, model, 
+    thresholds: dict) -> tuple[bool, dict]:
     """
     Perform cross-subject testing and evaluate performance.
 
@@ -138,10 +142,12 @@ def test_cross_subject(data_handler: dh.DataHandler, trainer: mt.ModelTrainer, m
         thresholds (dict): Performance thresholds.
 
     Returns:
-        bool: True if all cross-subject tests meet thresholds, False otherwise.
+        int: The number of tests failed.
+        dict: Evaluation metrics for each test performed.
     """
 
     print("Performing cross-subject testing...")
+    all_metrics = {}
     cross_subject_failures = 0
 
     for test_subject in data_handler.test_subjects:
@@ -158,19 +164,15 @@ def test_cross_subject(data_handler: dh.DataHandler, trainer: mt.ModelTrainer, m
             )
 
             metrics = trainer.test_model(model, test_sample)
+            all_metrics[test_subject] = metrics
 
             if not all(metrics[metric] >= thresholds[metric] for metric in thresholds):
                 print(f"Cross-subject test failed for {test_subject}.")
                 cross_subject_failures += 1
 
-    # Success state
-    if cross_subject_failures == 0:
-        print("All cross-subject tests passed.")
-        return True
-
     # Fail state
     print(f"Cross-subject failures: {cross_subject_failures}")
-    return False
+    return cross_subject_failures, all_metrics
 
 
 def train_on_subject (
@@ -251,6 +253,111 @@ def same_subject_test (
         print("Same-subject test failed.")
 
     return successful, metrics
+    
+    
+def register_model(model, model_name, cs_metrics):
+    """
+    Registers a given model in the MLFlow Model Registry.
+
+    Args:
+        model: The trained model to register.
+        model_name (str): Name of the model to register.
+        cs_metrics (dict): Cross-subject metrics to log with the model.
+
+    Returns:
+        None
+    """
+
+    # Log the model and metrics
+    mlflow.sklearn.log_model(
+        model, 
+        artifact_path="model", 
+        registered_model_name=model_name
+    )
+
+    # Need to interact with model registry to set additional tags
+    client = MlflowClient(mlflow.get_tracking_uri())
+    model_version = client.get_latest_versions(model_name, stages=['None'])[0].version
+
+    # Initialize a dictionary to accumulate sums for each metric
+    metric_sums = {metric: 0 for metric in next(iter(cs_metrics.values())).keys()}
+    subject_count = len(cs_metrics)
+
+        # Log cross-subject test metrics as tags
+    for subject, metrics in cs_metrics.items():
+        for metric, value in metrics.items():
+            metric_sums[metric] += value # Gets sums for later usage
+            # This stores subject specific results
+            # commented out as it seems excessive
+            # client.set_model_version_tag(
+            #     name=model_name,
+            #     version=model_version,
+            #     key=f"{subject}_{metric}",
+            #     value=value
+            # )
+    
+    # We'll also calculate and log the average of each metric for quick review
+    for metric, total in metric_sums.items():
+        avg_value = total / subject_count
+        client.set_model_version_tag(
+            name=model_name,
+            version=model_version,
+            key=f"avg_{metric}",
+            value=avg_value
+        )
+            
+    print(f"Model registered as '{model_name}'.")
+
+
+def promote_best_model(model_name: str, new_model_version: int):
+    """
+    Promote the best model based on avg_f1_score to the production stage.
+
+    Args:
+        model_name (str): Name of the registered model.
+        new_model_version (int): Latest version number of the model being compared.
+
+    Returns:
+        None
+    """
+    client = MlflowClient()
+
+    # Check if a model is already in production
+    production_versions = client.get_latest_versions(model_name, stages=["Production"])
+    if production_versions:
+        # Retrieve the current production model's version and avg_f1_score
+        current_prod_version = production_versions[0].version
+        current_prod_avg_f1 = float(client.get_model_version(model_name, current_prod_version).tags.get("avg_f1_score", "-inf"))
+
+        # Retrieve the new model's avg_f1_score
+        new_model_avg_f1 = float(client.get_model_version(model_name, new_model_version).tags.get("avg_f1_score", "-inf"))
+
+        # Compare the new model with the current production model
+        if new_model_avg_f1 > current_prod_avg_f1:
+            # Transition the new model to Production
+            client.transition_model_version_stage(
+                name=model_name,
+                version=new_model_version,
+                stage="Production"
+            )
+            
+            # Demote the old Production model
+            client.transition_model_version_stage(
+                name=model_name,
+                version=current_prod_version,
+                stage="Archived"
+            )
+            print(f"Model version {new_model_version} promoted to Production.")
+        else:
+            print(f"Model version {new_model_version} not promoted.")
+    else:
+        # No model is currently in Production, promote the new model
+        client.transition_model_version_stage(
+            name=model_name,
+            version=new_model_version,
+            stage="Production"
+        )
+        print(f"Model version {new_model_version} promoted to Production.")
 
 
 
@@ -346,12 +453,22 @@ def central_training_loop(data_handler: dh.DataHandler, thresholds: dict, max_it
 
             # Evaluate cross-subject performance, if thresholds are not met we must keep training with a new subject
             with mlflow.start_run(run_name="cross_subject_tests", nested=True):
-                if not test_cross_subject(data_handler, trainer, model, thresholds):
-                    print(f"Cross-subject test failed for {train_subject}.")
-                    mlflow.log_metric("cross_subject_pass", 0)
-                else: # Model successfully trained, exit loop
-                    mlflow.log_metric("cross_subject_pass", 1)
+                cs_fail_count, cs_metrics = test_cross_subject(data_handler, trainer, model, thresholds)
+                mlflow.log_metric("cross_subject_tests_failed", cs_fail_count)
+
+                # Store our trained model in registry along with cross-subject metrics
+                model_name = "harth_rfc"
+                model_version = register_model (model, model_name, cs_metrics)
+
+                # After a new model is registered check it's performance against previous versions
+                # promote to production if it's the best performing
+
+
+                if cs_fail_count is 0: # Model successfully trained, exit loop
+                    print("Cross-subject tests have been passed!")
                     break
+                else: # CS results have not met thresholds, continue to next subject 
+                    print(f"Cross-subject test failed for {train_subject}.")
 
         print("Restarting with a new training subject.")
         iteration += 1
