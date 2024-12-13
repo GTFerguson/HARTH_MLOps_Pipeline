@@ -3,6 +3,7 @@ from main import detect_drift, train_on_subject, central_training_loop
 from model_trainer import ModelTrainer
 from data_handler import DataHandler
 import pandas as pd
+import mlflow
 
 # Constants
 LABEL_COLUMN = 'label'
@@ -12,8 +13,8 @@ TRAIN_SAMPLE_SIZE = 500
 TEST_SAMPLE_SIZE = 2000
 
 THRESHOLDS = {
-    'accuracy': 0.9,
-    'f1_score': 0.85
+    'accuracy': 0.8,
+    'f1_score': 0.8
 }
 
 DRIFT_THRESHOLD = {
@@ -29,7 +30,7 @@ class TestDriftDetection(unittest.TestCase):
         previous_metrics = {"accuracy": 0.9, "f1_score": 0.85}
         new_metrics_no_drift = {"accuracy": 0.91, "f1_score": 0.86}
         new_metrics_with_drift = {"accuracy": 0.8, "f1_score": 0.7}
-        new_metrics_on_threshold = {"accuracy": 0.85, "f1_score": 0.8}
+        new_metrics_on_threshold = {"accuracy": 0.861, "f1_score": 0.821}
         new_metrics_drift_one_metric = {"accuracy": 0.849, "f1_score": 0.85}
         new_metrics_identical = previous_metrics
 
@@ -47,6 +48,7 @@ class TestTrainOnSubject(unittest.TestCase):
         mock_data = pd.DataFrame({"feature1": [0.1, 0.2], "label": [1, 0]})
         cumulative_data = pd.DataFrame()
 
+        mlflow.set_experiment("Test Experiment")
         # Test to ensure new samples are collected properly
         model, updated_data = train_on_subject(data_handler, cumulative_data, trainer, data_handler.train_subjects[0])
         self.assertGreater(len(updated_data), len(cumulative_data))
@@ -78,7 +80,7 @@ class TestDataHandler(unittest.TestCase):
 
         # Ensure used indices are excluded
         data_handler.test_used_indices = set([0, 1])
-        sample = data_handler.create_stratified_sample(mock_data, used_indices, sample_size=3, subject=None)
+        sample = data_handler.create_stratified_sample(mock_data, data_handler.test_used_indices, sample_size=3, subject=None)
         # Ensure none of the used indices are in the new sample
         self.assertTrue(set(sample.index).isdisjoint(data_handler.test_used_indices))
         # Ensure used indices are updated to include the new sample

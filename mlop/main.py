@@ -224,6 +224,8 @@ def detect_drift (previous_metrics: dict, new_metrics: dict):
     drift_detected = any(
         (previous_metrics[metric] - new_metrics[metric]) > DRIFT_THRESHOLD[metric]
         for metric in THRESHOLDS
+        # only check metrics provided in parameters
+        if metric in previous_metrics and metric in new_metrics 
     )
     return drift_detected
 
@@ -265,7 +267,7 @@ def register_model(model, model_name, cs_metrics):
         cs_metrics (dict): Cross-subject metrics to log with the model.
 
     Returns:
-        None
+        int: Model version number.
     """
 
     # Log the model and metrics
@@ -277,7 +279,12 @@ def register_model(model, model_name, cs_metrics):
 
     # Need to interact with model registry to set additional tags
     client = MlflowClient(mlflow.get_tracking_uri())
-    model_version = client.get_latest_versions(model_name, stages=['None'])[0].version
+
+    # Get the latest logged model (which would be the one just logged)
+    registered_versions = client.search_model_versions(f"name='{model_name}'")
+    model_version = max(
+        int(version.version) for version in registered_versions
+    )
 
     # Initialize a dictionary to accumulate sums for each metric
     metric_sums = {metric: 0 for metric in next(iter(cs_metrics.values())).keys()}
@@ -303,10 +310,11 @@ def register_model(model, model_name, cs_metrics):
             name=model_name,
             version=model_version,
             key=f"avg_{metric}",
-            value=avg_value
+            value=str(avg_value)
         )
             
     print(f"Model registered as '{model_name}'.")
+    return model_version
 
 
 def promote_best_model(model_name: str, new_model_version: int):
@@ -487,6 +495,7 @@ def central_training_loop(data_handler: dh.DataHandler, thresholds: dict, max_it
 def main ():
     mlflow.set_tracking_uri('http://mlflow:5000')
     mlflow.autolog()
+
     data_handler = dh.DataHandler(LABEL_COLUMN, FEATURE_COLUMNS, RANDOM_STATE)
     #cross_subject_train_and_test(data_handler)
     central_training_loop(data_handler, THRESHOLDS, 100)
