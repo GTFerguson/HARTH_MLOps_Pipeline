@@ -334,16 +334,21 @@ def promote_best_model(model_name: str, new_model_version: int):
             break
 
     # Retrieve the new model's avg_f1_score
-    new_model_avg_f1 = float(client.get_model_version(model_name, new_model_version).tags.get("avg_f1_score", "-inf"))
+    new_model_avg_f1 = float(
+        client.get_model_version(model_name, new_model_version).tags.get("avg_f1_score", "-inf")
+    )
 
     if current_prod_version:
+        print(f"Current Prod. F1-Score: {current_prod_avg_f1}")
+        print(f"New Version F1-Score: {new_model_avg_f1}")
+
         # Compare the new model with the current production model
         if new_model_avg_f1 > current_prod_avg_f1:
             # Set alias 'production' to the new model
-            client.set_model_version_alias(name=model_name, version=new_model_version, alias="production")
+            client.set_registered_model_alias(name=model_name, version=new_model_version, alias="production")
 
             # Remove alias 'production' from the old production model
-            client.delete_model_version_alias(name=model_name, version=current_prod_version, alias="production")
+            client.delete_registered_model(name=model_name, version=current_prod_version, alias="production")
             print(f"Model version {new_model_version} promoted to 'production'.")
         else:
             print(f"Model version {new_model_version} not promoted.")
@@ -460,6 +465,7 @@ def central_training_loop(data_handler: dh.DataHandler, thresholds: dict, max_it
 
                 # After a new model is registered check it's performance against previous versions
                 # promote to production if it's the best performing
+                promote_best_model(model_name, model_version)
 
 
                 if cs_fail_count == 0: # Model successfully trained, exit loop

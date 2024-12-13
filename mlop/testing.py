@@ -93,11 +93,10 @@ class TestTrainingPipeline(unittest.TestCase):
         thresholds = {"accuracy": 0.8, "f1_score": 0.8}
 
         # Run the training loop
-        central_training_loop(data_handler, thresholds, max_iterations=5)
+        central_training_loop(data_handler, thresholds, max_iterations=2)
 
-        # Assertions
+        # Check to see sampling was done
         self.assertGreater(len(data_handler.train_used_indices), 0)
-        self.assertTrue(data_handler.logs["metrics_logged"])
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ async def wait_for_production_model():
             client = mlflow.tracking.MlflowClient()
             model_versions = client.search_model_versions(f"name='{MODEL_NAME}'")
             for version in model_versions:
-                if version.current_stage == "Production":
+                if "production" in version.aliases:  # Check for alias 'production' 
                     print(f"Found production model: Version {version.version}")
 
                     # Load the production model
@@ -52,21 +52,28 @@ class PredictionRequest(BaseModel):
 # Define output schema
 class PredictionResponse(BaseModel):
     prediction: int
-    probability: float
 
 
 # Initialize FastAPI app with a lifespan context
 app = FastAPI(lifespan=lifespan)
-
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(data: PredictionRequest):
     """Make predictions using the loaded model."""
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded yet.")
-    prediction = model.predict([data.features])
-    return {"prediction": int(prediction[0]), "probability": float(max(prediction[0]))}
 
+    try:
+        # Prepare features
+        features = [data.features]
+
+        # Get prediction
+        prediction = model.predict(features)  # Predicted class
+        predicted_class = prediction[0]
+
+        return {"prediction": int(predicted_class)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
 @app.get("/health")
 async def health_check():
