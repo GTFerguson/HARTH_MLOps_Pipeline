@@ -11,8 +11,6 @@ class ModelTrainer:
         self.label_column = label_column
         self.feature_columns = feature_columns
         self.random_state = random_state
-        mlflow.set_tracking_uri('http://127.0.0.1:5000')
-        mlflow.autolog()
 
 
     def train_model (self, training_data : pd.DataFrame) -> RandomForestClassifier:
@@ -58,14 +56,14 @@ class ModelTrainer:
 
         # Evaluate model
         accuracy    = accuracy_score(y_test, y_pred)
-        precision   = precision_score(y_test, y_pred, average='weighted')
-        recall      = recall_score(y_test, y_pred, average='weighted')
-        f1          = f1_score(y_test, y_pred, average='weighted')
+        precision   = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+        recall      = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+        f1          = f1_score(y_test, y_pred, average='weighted', zero_division=0)
 
         print(f"\nAccuracy: {accuracy}")
         print(f"Recall: {recall}")
         print(f"Precision: {precision}")
-        print(f"F1 Score: {f1}")
+        print(f"F1 Score: {f1}\n")
         print("Classification Report:")
         print(classification_report(y_test, y_pred, zero_division=0))
 

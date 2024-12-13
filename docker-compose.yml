@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  mlflow:
+    build:
+      context: ./mlflow
+      dockerfile: Dockerfile.mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlflow/mlruns:/mlruns
+    environment:
+      - MLFLOW_TRACKING_URI=http://0.0.0.0:5000
+
+  mlop:
+    build:
+      context: ./mlop
+      dockerfile: Dockerfile.mlop
+    volumes:
+      - ./harth:/app/harth
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://0.0.0.0:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - mlflow
+
+  fastapi:
+    build:
+      context: ./fastapi
+      dockerfile: Dockerfile.fastapi
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mlflow
+      - mlop

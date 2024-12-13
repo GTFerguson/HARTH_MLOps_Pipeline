@@ -322,42 +322,35 @@ def promote_best_model(model_name: str, new_model_version: int):
     """
     client = MlflowClient()
 
-    # Check if a model is already in production
-    production_versions = client.get_latest_versions(model_name, stages=["Production"])
-    if production_versions:
-        # Retrieve the current production model's version and avg_f1_score
-        current_prod_version = production_versions[0].version
-        current_prod_avg_f1 = float(client.get_model_version(model_name, current_prod_version).tags.get("avg_f1_score", "-inf"))
+    # Check if a model with alias 'production' exists
+    model_versions = client.search_model_versions(f"name='{model_name}'")
+    current_prod_version = None
+    current_prod_avg_f1 = float("-inf")
 
-        # Retrieve the new model's avg_f1_score
-        new_model_avg_f1 = float(client.get_model_version(model_name, new_model_version).tags.get("avg_f1_score", "-inf"))
+    for version in model_versions:
+        if "production" in version.aliases:
+            current_prod_version = int(version.version)
+            current_prod_avg_f1 = float(version.tags.get("avg_f1_score", "-inf"))
+            break
 
+    # Retrieve the new model's avg_f1_score
+    new_model_avg_f1 = float(client.get_model_version(model_name, new_model_version).tags.get("avg_f1_score", "-inf"))
+
+    if current_prod_version:
         # Compare the new model with the current production model
         if new_model_avg_f1 > current_prod_avg_f1:
-            # Transition the new model to Production
-            client.transition_model_version_stage(
-                name=model_name,
-                version=new_model_version,
-                stage="Production"
-            )
-            
-            # Demote the old Production model
-            client.transition_model_version_stage(
-                name=model_name,
-                version=current_prod_version,
-                stage="Archived"
-            )
-            print(f"Model version {new_model_version} promoted to Production.")
+            # Set alias 'production' to the new model
+            client.set_model_version_alias(name=model_name, version=new_model_version, alias="production")
+
+            # Remove alias 'production' from the old production model
+            client.delete_model_version_alias(name=model_name, version=current_prod_version, alias="production")
+            print(f"Model version {new_model_version} promoted to 'production'.")
         else:
             print(f"Model version {new_model_version} not promoted.")
     else:
-        # No model is currently in Production, promote the new model
-        client.transition_model_version_stage(
-            name=model_name,
-            version=new_model_version,
-            stage="Production"
-        )
-        print(f"Model version {new_model_version} promoted to Production.")
+        # No model currently in 'production', set the alias to the new model
+        client.set_model_version_alias(name=model_name, version=new_model_version, alias="production")
+        print(f"Model version {new_model_version} set as 'production'.")
 
 
 
@@ -486,6 +479,8 @@ def central_training_loop(data_handler: dh.DataHandler, thresholds: dict, max_it
 
 
 def main ():
+    mlflow.set_tracking_uri('http://mlflow:5000')
+    mlflow.autolog()
     data_handler = dh.DataHandler(LABEL_COLUMN, FEATURE_COLUMNS, RANDOM_STATE)
     #cross_subject_train_and_test(data_handler)
     central_training_loop(data_handler, THRESHOLDS, 100)

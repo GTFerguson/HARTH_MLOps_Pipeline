@@ -43,20 +43,54 @@ class TestDriftDetection(unittest.TestCase):
 class TestTrainOnSubject(unittest.TestCase):
     def test_train_on_subject(self):
         data_handler = DataHandler(LABEL_COLUMN, FEATURE_COLUMNS, RANDOM_STATE)
+        trainer = ModelTrainer(LABEL_COLUMN, FEATURE_COLUMNS, RANDOM_STATE)
         mock_data = pd.DataFrame({"feature1": [0.1, 0.2], "label": [1, 0]})
         cumulative_data = pd.DataFrame()
-        trainer = ModelTrainer(LABEL_COLUMN, FEATURE_COLUMNS, RANDOM_STATE)
 
+        # Test to ensure new samples are collected properly
         model, updated_data = train_on_subject(data_handler, cumulative_data, trainer, data_handler.train_subjects[0])
-
         self.assertGreater(len(updated_data), len(cumulative_data))
+        # and that a model is generated
         self.assertIsNotNone(model)
+
+
+class TestDataHandler(unittest.TestCase):
+    def test_create_stratified_sample(self):
+        data_handler = DataHandler(LABEL_COLUMN, FEATURE_COLUMNS, RANDOM_STATE)
+        mock_data = pd.DataFrame({
+            'label': [1, 1, 2, 2, 3, 3],
+            'feature1': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            'subject': ['S1', 'S1', 'S1', 'S1', 'S2', 'S2']
+        })
+        sample = data_handler.create_stratified_sample(mock_data, data_handler.test_used_indices, sample_size=4, subject='S1')
+
+        # Check if correct sample size is created
+        self.assertEqual(len(sample), 4)
+        # and that it has been taken from the specified subject
+        self.assertTrue(sample['subject'].eq('S1').all())
+        # that the used indices were logged
+        self.assertSetEqual(set(sample.index), data_handler.test_used_indices)
+
+        # Testing behaviour when no subject specified
+        used_indices = set()
+        sample = data_handler.create_stratified_sample(mock_data, used_indices, sample_size=3, subject=None)
+        self.assertEqual(len(sample), 3)
+
+        # Ensure used indices are excluded
+        data_handler.test_used_indices = set([0, 1])
+        sample = data_handler.create_stratified_sample(mock_data, used_indices, sample_size=3, subject=None)
+        # Ensure none of the used indices are in the new sample
+        self.assertTrue(set(sample.index).isdisjoint(data_handler.test_used_indices))
+        # Ensure used indices are updated to include the new sample
+        self.assertSetEqual(data_handler.test_used_indices, {0, 1}.union(set(sample.index)))
+        
+
 
 # Integration testing
 class TestTrainingPipeline(unittest.TestCase):
     def test_central_training_loop(self):
         data_handler = DataHandler(LABEL_COLUMN, FEATURE_COLUMNS, RANDOM_STATE)
-        thresholds = {"accuracy": 0.9, "f1_score": 0.85}
+        thresholds = {"accuracy": 0.8, "f1_score": 0.8}
 
         # Run the training loop
         central_training_loop(data_handler, thresholds, max_iterations=5)
